@@ -1,6 +1,7 @@
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
+use ieee.std_logic_unsigned.all;
 
 entity lab4 is
   port(CLOCK_50            : in  std_logic;
@@ -11,7 +12,8 @@ entity lab4 is
        VGA_VS              : out std_logic;
        VGA_BLANK           : out std_logic;
        VGA_SYNC            : out std_logic;
-       VGA_CLK             : out std_logic);
+       VGA_CLK             : out std_logic;
+		 LEDG   					: out std_logic_vector(7 downto 0));
 end lab4;
 
 architecture rtl of lab4 is
@@ -28,6 +30,7 @@ architecture rtl of lab4 is
           plot                                         : in  std_logic;
           VGA_R, VGA_G, VGA_B                          : out std_logic_vector(9 downto 0);
           VGA_HS, VGA_VS, VGA_BLANK, VGA_SYNC, VGA_CLK : out std_logic);
+			 
   end component;
 
   signal x      : std_logic_vector(7 downto 0);
@@ -36,7 +39,8 @@ architecture rtl of lab4 is
   signal plot   : std_logic;
   signal int_value : std_logic; 
   signal Xposition : std_logic_vector (7 downto 0);
-  signal Yposition : std_logic_vector (6 downto 0);  
+  signal Yposition : std_logic_vector (6 downto 0); 
+  signal count     : std_logic_vector (10 downto 0);
 begin
 
   -- includes the vga adapter, which should be in your project 
@@ -61,11 +65,23 @@ begin
 
 
   -- rest of your code goes here, as well as possibly additional files
-  process(CLOCK_50,KEY)
+     process(CLOCK_50) -- Slow Clock
+        variable count_f : unsigned (10 downto 0);
+		  begin
+		  
+          if (CLOCK_50'event and CLOCK_50 = '1') then
+            count_f := unsigned (count);
+				count_f := count_f +1;
+				count <= std_logic_vector (count_f);
+          end if;
+			 
+      end process;
+  
+  process(KEY, count)
   variable countX : integer range 0 to 159;
   variable countY : integer range 0 to 119;
   variable colourVar : std_logic_vector(2 downto 0); 
-  variable int_value : std_logic;
+  variable int_value : std_logic_vector(1 downto 0);
   variable Xinitial : std_logic_vector (7 downto 0) := "01010000";
   variable Yinitial : std_logic_vector (6 downto 0) := "0111100";  
   variable absX0 : signed (8 downto 0);
@@ -80,73 +96,92 @@ begin
   variable Actual_error : signed (17 downto 0);
   
   begin
-	if(KEY(3) = '0') then
-		int_value := '0';
-   elsif(CLOCK_50'event and CLOCK_50 = '1') then
-	if(KEY(0) = '0') then
-		int_value := '1';
+	if(KEY(3) = '0') then -- Reset
+		int_value := "00";
+		LEDG(0)<= '0';
+   elsif(count(count'left)'event and count(count'left) = '1') then -- each time a counter overflows, 1 bit is plotted on screen
+	if(KEY(0) = '0') then -- Each time Key(0) is pressed, a line is plotted
+	   LEDG(0)<= '0';
+		int_value := "01";
 	end if;
 	case int_value is
-	 when '0' => 
-		if(countX = 159) then
+	 when "00" => 
+		Xinitial := "01010000";
+		Yinitial := "0111100";
+		if(countX > 159) then
 			countY := countY + 1;
 			countX := 0;
 		else
 			countX := countX + 1;
 		end if;
-		if(countY = 119) then
+		if(countY > 119) then
 			countY := 0;
 		end if;
+		
+		if(countX < 1 and countY < 1) then -- modified here (was =0)
+		colourVar := "001";
+		elsif(countX = 159 and countY < 1) then
+		colourVar := "001";
+		elsif(countX < 1 and countY = 119) then
+		colourVar := "001";
+		elsif (countX = 159 and countY = 119) then
+		colourVar := "001";
+		else
 		colourVar := "000";
+		end if;
+		plot <= '1';
 		x <= std_logic_vector(to_unsigned(countX,8));
 		y <= std_logic_vector(to_unsigned(countY,7));		
-	 when '1' => 
+	 when "01" => 
 		absX0 := signed('0' & Xinitial);
 		absX1 := signed('0' & Xposition);
 		Xlength := abs(absX1 - absX0);
 		absY0 := signed('0' & Yinitial);
 		absY1 := signed('0' & Yposition);
 		Ylength := abs(absY1 - absY0);
-		
+
 		if(Xinitial < Xposition) then
 		Xsignal := to_signed(1,4);
 		else
 		Xsignal := to_signed(-1,4);
 		end if;
-		
+
 		if(Yinitial < Yposition) then
 		Ysignal := to_signed(1,4);
 		else
 		Ysignal := to_signed(-1,4);
 		end if;
-		
+
 		Init_error := Xlength - Ylength;
 
-		if ((Xposition /= Xinitial) or (Yposition /= Yinitial)) then
+		if ((Xposition /= Xinitial) and (Yposition /= Yinitial)) then
 		Actual_error := 2*Init_error;
 		else
-		Xinitial := "01010000";
-		Yinitial := "0111100";
+		int_value := "10";
 		end if;
-		
+
 		if(Actual_error > -Ylength) then
 		Init_error := Init_error - Ylength;
 		Xinitial := std_logic_vector(signed(Xinitial) + Xsignal);
 		end if;
-		
+
 		if(Actual_error < Xlength) then
 		Init_error := Init_error + Xlength;
 		Yinitial := std_logic_vector(signed(Yinitial) + Ysignal);
 		end if;
-		colourVar := "001";
+		colourVar := colourVar + 1;
+		plot <= '1';
 		x <= Xinitial;
 		y <= Yinitial;
+		when others =>
+		LEDG(0) <= '1';
+		plot<= '0';
+		Xinitial := "01010000";
+		Yinitial := "0111100";
 		end case;
-		plot <= '1';
+		
 		colour <= colourVar;
 	 end if;
 	 end process;
-	
+
 end RTL;
-
-
